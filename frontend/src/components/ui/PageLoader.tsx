@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Wind, RefreshCw, AlertCircle, PlayCircle, Clock } from 'lucide-react';
+import { resolveApiBaseUrl, setCustomApiBaseUrl, getStoredCustomApiUrl } from '@/services/api';
 
 interface PageLoaderProps {
   elapsedSeconds: number;
@@ -27,6 +28,7 @@ export const PageLoader: React.FC<PageLoaderProps> = ({
   onEnableDemo,
 }) => {
   const [messageIndex, setMessageIndex] = useState(0);
+  const [customUrlInput, setCustomUrlInput] = useState(() => getStoredCustomApiUrl() || '');
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -79,13 +81,36 @@ export const PageLoader: React.FC<PageLoaderProps> = ({
           <div className="w-full">
             <div className="p-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs mb-6 text-left flex items-start space-x-3">
               <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
-              <div>
+              <div className="flex-1">
                 <p className="font-semibold text-rose-900 mb-1">Backend Connection Issue</p>
                 <p className="text-slate-600 leading-relaxed">{error}</p>
                 {isConnectionError && (
-                  <p className="text-[11px] text-slate-500 mt-2 font-mono">
-                    Target: {import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'}
-                  </p>
+                  <div className="mt-3 pt-2 border-t border-rose-200/60">
+                    <p className="text-[11px] text-slate-500 font-mono mb-2">
+                      Active Target: <span className="font-semibold text-slate-700">{resolveApiBaseUrl()}</span>
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="url"
+                        placeholder="https://your-fastapi-backend.com"
+                        value={customUrlInput}
+                        onChange={(e) => setCustomUrlInput(e.target.value)}
+                        className="flex-1 px-2.5 py-1.5 bg-white border border-slate-300 rounded-md text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (customUrlInput.trim()) {
+                            setCustomApiBaseUrl(customUrlInput);
+                            onRetry();
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold whitespace-nowrap transition-colors"
+                      >
+                        Set & Connect
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

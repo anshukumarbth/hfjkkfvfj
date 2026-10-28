@@ -154,3 +154,34 @@ async def test_forecast_detail_evolution(mock_data_service):
     assert detail.all_forecast_revisions[0].is_eligible is True
     assert detail.all_forecast_revisions[1].is_eligible is True
     assert detail.all_forecast_revisions[2].is_eligible is False
+
+
+@pytest.mark.asyncio
+async def test_hourly_forecast_aligns_to_both_half_hours(mock_data_service):
+    """Verify that forecast matching prioritizes exact half-hour start_time when present,
+
+    and accurately falls back to the hourly forecast window for unpopulated half-hour periods.
+    """
+    svc = ForecastService(data_service=mock_data_service)
+    records = await svc.get_matched_forecast_actual(
+        start_date="2026-01-01",
+        end_date="2026-01-01",
+        day_ahead_cutoff_hour=12,
+    )
+
+    # 1. Period with exact half-hour forecast (SP 2: 00:30:00Z)
+    dt2 = datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
+    rec2 = next((r for r in records if r.start_time == dt2), None)
+    assert rec2 is not None, "SP 2 (00:30) record must exist"
+    assert rec2.forecast_mw == 13500.0  # Exact match from fixture
+    assert rec2.actual_mw == 13000.0
+    assert rec2.signed_error_mw == 500.0  # 13500 - 13000
+
+    # 2. Period where only an hourly forecast exists (02:00:00Z in WINDFOR, no 02:30:00Z)
+    # The second half-hour (SP 6: 02:30:00Z) must fall back to the 02:00:00Z hourly forecast
+    dt6 = datetime(2026, 1, 1, 2, 30, tzinfo=timezone.utc)
+    rec6 = next((r for r in records if r.start_time == dt6), None)
+    assert rec6 is not None, "SP 6 (02:30) record must exist via hourly window expansion"
+    assert rec6.forecast_mw == 14000.0  # Successfully aligned to 02:00:00Z forecast
+    assert rec6.forecast_candidates_count > 0
+

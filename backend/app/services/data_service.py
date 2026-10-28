@@ -90,10 +90,19 @@ class DataService:
         if cached is not None:
             return cached
 
-        # Query Elexon FUELHH using settlement date filters
+        dt_start = parse_utc_timestamp(start_date) or datetime(2026, 1, 1, tzinfo=timezone.utc)
+        dt_end = parse_utc_timestamp(end_date) or datetime(2026, 1, 31, tzinfo=timezone.utc)
+        if len(str(start_date).strip()) <= 10:
+            dt_start = dt_start.replace(hour=0, minute=0, second=0, microsecond=0)
+        if len(str(end_date).strip()) <= 10:
+            dt_end = dt_end.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+        # Query Elexon FUELHH using settlement date filters formatted as YYYY-MM-DD
+        s_from = str(start_date).strip()[:10]
+        s_to = str(end_date).strip()[:10]
         raw_items = await self.client.fetch_actual_wind_generation(
-            settlement_date_from=start_date,
-            settlement_date_to=end_date,
+            settlement_date_from=s_from,
+            settlement_date_to=s_to,
         )
 
         if not raw_items:
@@ -105,6 +114,8 @@ class DataService:
         for item in raw_items:
             st = parse_utc_timestamp(item.get("startTime"))
             if not st:
+                continue
+            if st < dt_start or st > dt_end:
                 continue
             pub = parse_utc_timestamp(item.get("publishTime"))
             gen = safe_float(item.get("generation"))
@@ -148,13 +159,19 @@ class DataService:
         if cached is not None:
             return cached
 
-        # Calculate publication query window: from 3 days prior to end of end_date
+        # Parse delivery window bounds
         dt_start = parse_utc_timestamp(start_date) or datetime(2026, 1, 1, tzinfo=timezone.utc)
         dt_end = parse_utc_timestamp(end_date) or datetime(2026, 1, 31, tzinfo=timezone.utc)
-        dt_end = dt_end.replace(hour=23, minute=59, second=59)
+        
+        # If date strings were provided without time (e.g. YYYY-MM-DD), set full-day boundaries
+        if len(str(start_date).strip()) <= 10:
+            dt_start = dt_start.replace(hour=0, minute=0, second=0, microsecond=0)
+        if len(str(end_date).strip()) <= 10:
+            dt_end = dt_end.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-        pub_from = dt_start - timedelta(days=3)
-        pub_to = dt_end + timedelta(hours=2)
+        # Calculate publication query window: from 5 days prior to end of end_date
+        pub_from = dt_start - timedelta(days=5)
+        pub_to = dt_end + timedelta(hours=4)
 
         raw_items = await self.client.fetch_forecast_wind_generation(
             publish_date_from=format_iso_utc(pub_from),
@@ -165,7 +182,7 @@ class DataService:
             logger.warning("No forecast wind records returned for publish window %s to %s", pub_from, pub_to)
             return []
 
-        dt_range_start = dt_start.replace(hour=0, minute=0, second=0, microsecond=0)
+        dt_range_start = dt_start
         dt_range_end = dt_end
 
         # Deduplicate by (start_time, publish_time)
