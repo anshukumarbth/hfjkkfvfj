@@ -1,0 +1,73 @@
+name: gridbricks-wind-analytics
+
+services:
+  # ============================================================================
+  # Python FastAPI Backend Service
+  # Handles Elexon BMRS ingestion, day-ahead cutoff filtering, and metrics calculation
+  # ============================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: gridbricks-backend:latest
+    container_name: gridbricks-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ELEXON_API_BASE_URL=${ELEXON_API_BASE_URL:-https://data.elexon.co.uk/bmrs/api/v1}
+      - FUELHH_STREAM_URL=${FUELHH_STREAM_URL:-https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELHH/stream}
+      - WINDFOR_STREAM_URL=${WINDFOR_STREAM_URL:-https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream}
+      - DEFAULT_START_DATE=${DEFAULT_START_DATE:-2026-01-01}
+      - DEFAULT_END_DATE=${DEFAULT_END_DATE:-2026-01-31}
+      - DEFAULT_DAY_AHEAD_CUTOFF_HOUR=${DEFAULT_DAY_AHEAD_CUTOFF_HOUR:-12}
+      - HTTP_TIMEOUT_SECONDS=${HTTP_TIMEOUT_SECONDS:-30.0}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - RETRY_BACKOFF_FACTOR=${RETRY_BACKOFF_FACTOR:-0.5}
+      - CORS_ORIGINS=${CORS_ORIGINS:-["http://localhost:5173","http://localhost:3000","http://localhost:80","http://127.0.0.1:5173","http://127.0.0.1:3000","http://127.0.0.1:80"]}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - gridbricks-network
+
+  # ============================================================================
+  # React + Vite Frontend Service
+  # Production SPA compiled and served via high-performance Alpine Nginx
+  # ============================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    image: gridbricks-frontend:latest
+    container_name: gridbricks-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:80/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - gridbricks-network
+
+# ==============================================================================
+# Isolated Bridge Network for Inter-Container Communication
+# ==============================================================================
+networks:
+  gridbricks-network:
+    driver: bridge
