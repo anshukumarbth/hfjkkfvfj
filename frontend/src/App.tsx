@@ -21,6 +21,7 @@ import { ForecastDetailModal } from '@/components/dashboard/ForecastDetailModal'
 import { PageLoader } from '@/components/ui/PageLoader';
 import { SectionSkeleton } from '@/components/ui/SectionSkeleton';
 import { formatMW, formatPercent } from '@/utils/formatters';
+import { resolveApiBaseUrl, setCustomApiBaseUrl, resetCustomApiBaseUrl, getStoredCustomApiUrl } from '@/services/api';
 
 export function App() {
   const {
@@ -42,6 +43,8 @@ export function App() {
 
   const [activeSection, setActiveSection] = useState('dashboard');
   const [selectedPeriodStartTime, setSelectedPeriodStartTime] = useState<string | null>(null);
+  const [backendUrlInput, setBackendUrlInput] = useState(() => getStoredCustomApiUrl() || resolveApiBaseUrl());
+  const [backendUrlFeedback, setBackendUrlFeedback] = useState<string | null>(null);
 
   const handleNavigate = (sectionId: string) => {
     setActiveSection(sectionId);
@@ -251,16 +254,53 @@ export function App() {
                     <label className="block text-slate-600 mb-1 font-semibold">
                       FastAPI Backend Endpoint URL
                     </label>
-                    <input
-                      type="text"
-                      disabled
-                      value={import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'}
-                      className="w-full bg-slate-100 border border-slate-200 text-slate-500 font-mono text-xs rounded-lg p-2.5 cursor-not-allowed"
-                    />
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="url"
+                        value={backendUrlInput}
+                        onChange={(e) => setBackendUrlInput(e.target.value)}
+                        placeholder="https://your-public-fastapi-backend.com"
+                        className="flex-1 bg-white border border-slate-300 text-slate-800 font-mono text-xs rounded-lg p-2.5 focus:outline-none focus:border-blue-500 shadow-sm"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (backendUrlInput.trim()) {
+                              setCustomApiBaseUrl(backendUrlInput);
+                              refresh();
+                              setBackendUrlFeedback('Saved! Reconnecting...');
+                              setTimeout(() => setBackendUrlFeedback(null), 3000);
+                            }
+                          }}
+                          className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors whitespace-nowrap"
+                        >
+                          Save & Connect
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            resetCustomApiBaseUrl();
+                            setBackendUrlInput(resolveApiBaseUrl());
+                            refresh();
+                            setBackendUrlFeedback('Reset to default URL');
+                            setTimeout(() => setBackendUrlFeedback(null), 3000);
+                          }}
+                          className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-2 text-[11px] text-emerald-600">
-                    <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                    <span>Configured via environment variable <code>VITE_API_BASE_URL</code></span>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <div className="flex items-center space-x-1.5 text-emerald-600">
+                      <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                      <span>Active URL: <code className="font-mono font-semibold">{resolveApiBaseUrl()}</code></span>
+                    </div>
+                    {backendUrlFeedback && (
+                      <span className="font-semibold text-blue-600 animate-pulse">{backendUrlFeedback}</span>
+                    )}
                   </div>
                 </div>
               </div>

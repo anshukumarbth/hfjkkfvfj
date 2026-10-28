@@ -131,3 +131,68 @@ def test_no_matched_periods_with_only_unmatched_records():
     assert summary.rmse is None
     assert summary.mbe is None
     assert summary.mape is None
+
+
+def test_mixed_error_distribution_and_cumulative_energy():
+    """Verify that both positive (overforecasting) and negative (underforecasting) errors
+
+    are correctly tracked in MBE, min/max signed error, and energy (MW * 0.5h = MWh).
+    """
+    from datetime import datetime, timezone, timedelta
+    base_dt = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    records = []
+
+    # 48 periods overforecast (Forecast > Actual)
+    for i in range(48):
+        records.append(
+            MatchedPeriodRecord(
+                start_time=base_dt + timedelta(minutes=30 * i),
+                settlement_date="2026-01-01",
+                settlement_period=i + 1,
+                forecast_mw=15000.0,
+                actual_mw=12000.0,
+                signed_error_mw=3000.0,
+                absolute_error_mw=3000.0,
+                percentage_error=25.0,
+            )
+        )
+
+    # 48 periods underforecast (Forecast < Actual)
+    for i in range(48, 96):
+        records.append(
+            MatchedPeriodRecord(
+                start_time=base_dt + timedelta(minutes=30 * i),
+                settlement_date="2026-01-02",
+                settlement_period=(i % 48) + 1,
+                forecast_mw=10000.0,
+                actual_mw=14000.0,
+                signed_error_mw=-4000.0,
+                absolute_error_mw=4000.0,
+                percentage_error=28.57,
+            )
+        )
+
+    response = AnalyticsService.calculate_metrics(records)
+    summary = response.summary
+
+    assert summary.total_delivery_periods == 96
+    assert summary.matched_periods_count == 96
+    assert summary.missing_forecast_count == 0
+    assert summary.missing_actual_count == 0
+
+    # MAE = (48 * 3000 + 48 * 4000) / 96 = 3500.0
+    assert summary.mae == 3500.0
+
+    # MBE = (48 * 3000 + 48 * (-4000)) / 96 = (144000 - 192000) / 96 = -48000 / 96 = -500.0
+    assert summary.mbe == -500.0
+
+    # Signed error boundaries
+    assert summary.min_signed_error_mw == -4000.0
+    assert summary.max_signed_error_mw == 3000.0
+
+    # Cumulative energy (MW * 0.5h = MWh)
+    # Total Forecast MWh = (48 * 15000 + 48 * 10000) * 0.5 = (720000 + 480000) * 0.5 = 600,000 MWh
+    # Total Actual MWh = (48 * 12000 + 48 * 14000) * 0.5 = (576000 + 672000) * 0.5 = 624,000 MWh
+    assert summary.total_forecast_generation_mwh == 600000.0
+    assert summary.total_actual_generation_mwh == 624000.0
+

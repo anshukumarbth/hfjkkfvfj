@@ -100,14 +100,29 @@ class ForecastService:
             st = rec["start_time"]
             forecasts_by_start.setdefault(st, []).append(rec)
 
-        # Union of all delivery startTimes present in either dataset within the date window
-        all_start_times = sorted(set(actuals_by_start.keys()) | set(forecasts_by_start.keys()))
+        # Union of all delivery startTimes present in actuals and forecasts.
+        # Since WINDFOR stream is published hourly (00:00, 01:00, etc.) whereas GB settlement
+        # periods are half-hourly, expand each hourly forecast start_time to include both half-hours.
+        all_half_hours = set(actuals_by_start.keys())
+        for f_st in forecasts_by_start.keys():
+            all_half_hours.add(f_st)
+            if f_st.minute == 0:
+                all_half_hours.add(f_st + timedelta(minutes=30))
+        all_start_times = sorted(all_half_hours)
 
         results: List[MatchedPeriodRecord] = []
 
         for st in all_start_times:
             actual_rec = actuals_by_start.get(st)
-            candidates = forecasts_by_start.get(st, [])
+
+            # Retrieve forecast candidates: check exact half-hour start_time first;
+            # if none exist (hourly WINDFOR stream), retrieve candidates for the corresponding hour window
+            candidates = forecasts_by_start.get(st)
+            if not candidates and st.minute != 0:
+                hourly_st = st.replace(minute=0, second=0, microsecond=0)
+                candidates = forecasts_by_start.get(hourly_st, [])
+            elif not candidates:
+                candidates = []
 
             # Compute settlement date and period if not present in actual_rec
             if actual_rec and actual_rec.get("settlement_date"):
@@ -215,9 +230,11 @@ class ForecastService:
             start_date=date_str,
             end_date=date_str,
         )
+        hourly_st = st.replace(minute=0, second=0, microsecond=0)
         candidates_for_st = [
             f for f in all_forecasts
-            if f["start_time"] == st and f.get("generation_mw") is not None
+            if (f["start_time"] == st or (st.minute != 0 and f["start_time"] == hourly_st))
+            and f.get("generation_mw") is not None
         ]
         candidates_for_st.sort(key=lambda x: x["publish_time"])
 

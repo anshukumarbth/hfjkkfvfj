@@ -7,11 +7,86 @@ import {
   QueryFilters,
 } from '@/types/forecast';
 
-// Base API configuration from Vite environment variables
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000' || 'https://hfjkkfvfj.vercel.app/';
+const CUSTOM_URL_KEY = 'GRIDBRICKS_API_URL';
+
+/**
+ * Resolves the backend API base URL with graceful fallback for Vercel and production deployments.
+ * Priority:
+ * 1. User-configured override in localStorage (GRIDBRICKS_API_URL)
+ * 2. Vite environment variable (VITE_API_BASE_URL)
+ * 3. Localhost default (http://127.0.0.1:8000) when running on local machine
+ * 4. Window origin fallback when deployed on cloud hosts like Vercel
+ */
+export function resolveApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const customUrl = localStorage.getItem(CUSTOM_URL_KEY);
+      if (customUrl && customUrl.trim() !== '') {
+        return customUrl.trim().replace(/\/+$/, '');
+      }
+    } catch {
+      // localStorage may not be accessible in restricted environments
+    }
+  }
+
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    // On local machine, connect to local FastAPI server
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+      return 'http://127.0.0.1:8000';
+    }
+    // On Vercel or cloud deployment, default to origin (for reverse proxies or same-domain routing)
+    return window.location.origin.replace(/\/+$/, '');
+  }
+
+  return 'http://127.0.0.1:8000';
+}
+
+export function getStoredCustomApiUrl(): string | null {
+  if (typeof window !== 'undefined') {
+    try {
+      return localStorage.getItem(CUSTOM_URL_KEY);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function setCustomApiBaseUrl(url: string): void {
+  const cleanUrl = url.trim().replace(/\/+$/, '');
+  if (typeof window !== 'undefined') {
+    try {
+      if (cleanUrl) {
+        localStorage.setItem(CUSTOM_URL_KEY, cleanUrl);
+      } else {
+        localStorage.removeItem(CUSTOM_URL_KEY);
+      }
+    } catch (e) {
+      console.warn('Failed to save custom API URL:', e);
+    }
+  }
+  apiClient.defaults.baseURL = cleanUrl || resolveApiBaseUrl();
+}
+
+export function resetCustomApiBaseUrl(): void {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(CUSTOM_URL_KEY);
+    } catch (e) {
+      console.warn('Failed to clear custom API URL:', e);
+    }
+  }
+  apiClient.defaults.baseURL = resolveApiBaseUrl();
+}
 
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: resolveApiBaseUrl(),
   timeout: 25000, // 25s timeout
   headers: {
     'Content-Type': 'application/json',
@@ -32,6 +107,7 @@ export class ApiError extends Error {
 }
 
 function handleAxiosError(error: unknown, context: string): never {
+  const currentBase = apiClient.defaults.baseURL || resolveApiBaseUrl();
   if (axios.isAxiosError(error)) {
     const axiosErr = error as AxiosError<{ detail?: string; error?: string }>;
     if (axiosErr.response) {
@@ -39,7 +115,7 @@ function handleAxiosError(error: unknown, context: string): never {
       throw new ApiError(`${context}: ${detail}`, axiosErr.response.status);
     } else if (axiosErr.request) {
       throw new ApiError(
-        `Unable to reach backend at ${API_BASE_URL}. Ensure the FastAPI server is running.`,
+        `Unable to reach backend at ${currentBase}. Ensure the FastAPI server is running and accessible.`,
         undefined,
         true
       );
